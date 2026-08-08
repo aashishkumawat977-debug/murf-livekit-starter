@@ -33,9 +33,9 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfig = {
-  companyName: 'Murf AI',
-  pageTitle: 'Voice Agent Starter',
-  pageDescription: 'A voice agent powered by Murf Falcon — the fastest TTS API',
+  companyName: 'Anisha AI',
+  pageTitle: 'Anisha AI — Learning & Literacy Assistant',
+  pageDescription: 'Your AI-powered voice companion for reading, vocabulary, grammar, and pronunciation.',
 
   supportsChatInput: true,
   supportsVideoInput: true,
@@ -46,7 +46,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   accent: '#6366F1',
   logoDark: '/murf-logo-dark.svg',
   accentDark: '#818cf8',
-  startButtonText: 'Start talking',
+  startButtonText: 'Start Learning Session',
 
   // optional: audio visualization configuration
   // audioVisualizerType: 'bar',
@@ -65,7 +65,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   // audioVisualizerType: 'aura',
 
   // agent dispatch configuration
-  agentName: process.env.AGENT_NAME ?? undefined,
+  agentName: process.env.AGENT_NAME || 'anisha',
 
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,
