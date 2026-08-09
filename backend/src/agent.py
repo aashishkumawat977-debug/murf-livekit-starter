@@ -24,7 +24,11 @@ from livekit.plugins import (
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from prompt import SYSTEM_PROMPT
-from memory_db import init_database, lookup_caller, save_caller as db_save_caller
+from memory_db import (
+    init_database,
+    lookup_caller,
+    save_caller as db_save_caller,
+)
 
 # =========================================================
 # Anisha - Learning & Literacy Voice Assistant
@@ -67,8 +71,121 @@ class Assistant(Agent):
                 "invent any previous information."
             )
 
+        language_instruction = """
+IMPORTANT LANGUAGE RULE:
+Always reply in the same language the caller is using.
+
+- If the caller speaks Hindi, reply completely in Hindi using Devanagari script.
+- If the caller speaks English, reply in English.
+- If the caller speaks Hinglish, reply naturally in Hinglish.
+- Do not switch to English when the caller is speaking Hindi.
+- Do not translate a Hindi question into English unless the caller asks.
+"""
+
+        memory_permission_instruction = """
+PERSISTENT MEMORY PERMISSION RULES — HIGHEST PRIORITY:
+
+When the caller provides NEW personal or learning information that could
+be useful in future conversations, you MUST ask for permission to remember
+it BEFORE continuing the conversation.
+
+CRITICAL RULE:
+The permission question MUST come first.
+
+Example:
+
+Caller:
+"मुझे Python function समझने में दिक्कत होती है।"
+
+Your FIRST response MUST be:
+"क्या मैं ये जानकारी अगली बार के लिए याद रखूँ?"
+
+Do NOT:
+- explain Python
+- give an example
+- ask another question
+- give advice
+- say "कोई बात नहीं"
+- continue the learning conversation
+
+ONLY ask for permission first.
+
+Then WAIT for the caller's answer.
+
+If the caller says:
+- yes
+- हाँ
+- haan
+- याद रखो
+- याद रखना
+- yes remember
+- or clearly agrees
+
+then:
+1. Call save_caller_memory with permission="yes".
+2. Save the NEW information the caller just provided.
+3. Only after the tool succeeds, tell the caller it has been remembered.
+4. Then continue the conversation normally.
+
+If the caller says:
+- no
+- नहीं
+- nahi
+- don't remember
+- or refuses
+
+then:
+- Do NOT call save_caller_memory.
+- Do NOT save the information.
+- Continue the conversation normally.
+
+DIRECT MEMORY REQUEST:
+If the caller explicitly says:
+"मुझे याद रखो"
+"इसे याद रखो"
+"याद रखना"
+"इसको याद रखना"
+or an equivalent direct request,
+
+this is already explicit permission.
+
+In that case:
+- Do NOT ask permission again.
+- Immediately call save_caller_memory with permission="yes".
+- Save the information the caller is asking you to remember.
+
+IMPORTANT:
+Never claim information was saved unless save_caller_memory actually
+returns successfully.
+
+Existing memory:
+- You may read and use existing memory naturally.
+- Do not ask permission to use information already stored.
+- Do not save existing information again unless the caller provides
+  genuinely new information.
+- Never invent memories.
+
+Useful information includes:
+- caller's name
+- preferred language
+- learning level
+- subjects being studied
+- topics being studied
+- topics already covered
+- recurring learning difficulties
+- recurring mistakes
+
+If new useful learning information is provided, ALWAYS ask for permission
+before saving it.
+"""
+
         super().__init__(
-            instructions=SYSTEM_PROMPT + memory_context,
+            instructions=(
+                SYSTEM_PROMPT
+                + memory_context
+                + language_instruction
+                + memory_permission_instruction
+            ),
         )
 
     @function_tool
@@ -78,11 +195,31 @@ class Assistant(Agent):
         name: str | None = None,
         language_preference: str | None = None,
         facts: dict | None = None,
+        permission: str = "no",
     ) -> str:
         """
-        Save caller information when the caller explicitly shares it.
-        Only save information relevant to future learning conversations.
+        Save caller information only after explicit permission.
         """
+
+        approved = permission.strip().lower() in {
+            "yes",
+            "y",
+            "haan",
+            "ha",
+            "हाँ",
+            "हां",
+            "हां जी",
+            "हाँ जी",
+        }
+
+        if not approved:
+            logger.info(
+                "Caller did not give permission to save memory for %s",
+                self.user_id,
+            )
+            return (
+                "Memory was not saved because permission was not given."
+            )
 
         memory = db_save_caller(
             user_id=self.user_id,
@@ -144,7 +281,6 @@ async def anisha_agent(ctx: JobContext):
 
     init_database()
 
-    # Wait for the human participant to join.
     participant = await ctx.wait_for_participant()
     user_id = participant.identity
 
@@ -153,7 +289,6 @@ async def anisha_agent(ctx: JobContext):
         user_id,
     )
 
-    # Load memory for this caller.
     caller_memory = lookup_caller(user_id)
 
     if caller_memory:
@@ -172,18 +307,16 @@ async def anisha_agent(ctx: JobContext):
     # ---------------------------------------------------------
 
     session = AgentSession(
-        # Multilingual speech recognition.
         stt=deepgram.STT(
             model="nova-3",
             language="multi",
         ),
 
-        # Gemini powers Anisha's educational conversation.
         llm=google.LLM(
             model="gemini-3.5-flash-lite",
         ),
 
-        # Murf Falcon TTS.
+        # Anisha voice - locale intentionally not hardcoded.
         tts=murf.TTS(
             voice="Anisha",
             style="Conversation",
@@ -193,13 +326,10 @@ async def anisha_agent(ctx: JobContext):
             text_pacing=True,
         ),
 
-        # Multilingual turn detection.
         turn_detection=MultilingualModel(),
 
-        # Voice activity detection.
         vad=ctx.proc.userdata["vad"],
 
-        # Faster response generation.
         preemptive_generation=True,
     )
 
@@ -235,25 +365,21 @@ async def anisha_agent(ctx: JobContext):
     # ---------------------------------------------------------
 
     if caller_memory and caller_memory.get("name"):
+        name = caller_memory.get("name")
+
         welcome = (
-            f"Welcome back, {caller_memory['name']}! "
-            "Main Anisha hoon, aapki Learning & Literacy assistant. "
-            "Aaj kya padhna ya practice karna hai?"
+            f"नमस्ते {name}! वापस स्वागत है। "
+            "आज क्या पढ़ना या अभ्यास करना है?"
         )
     else:
         welcome = (
-            "Give a short and warm welcome as Anisha, "
-            "a Learning & Literacy voice assistant. "
-            "Speak naturally in Indian Hindi. "
-            "Welcome the learner and invite them to ask a "
-            "study question, learn a concept, or practice "
-            "something they are studying. "
-            "Keep the greeting friendly, natural, and concise. "
-            "Do not give a long introduction."
+            "नमस्ते! मैं अनिशा हूँ, आपकी Learning & Literacy assistant। "
+            "आज क्या पढ़ना या अभ्यास करना है?"
         )
 
-    await session.generate_reply(
-        instructions=welcome,
+    await session.say(
+        welcome,
+        allow_interruptions=False,
     )
 
 
