@@ -276,3 +276,24 @@ For deeper documentation on each part, see:
 ## License
 
 MIT
+
+## Day 5 - The Tools
+
+### Learning & Literacy Exercise Tool
+
+For Day 5, Anisha was extended with a learning exercise function tool for the Learning & Literacy track.
+
+The tool uses a local, hand-built dataset of learning exercises for supported school levels and subjects.
+
+**Supported subjects:**
+- Math
+- English
+
+The agent automatically calls the learning exercise tool when a learner asks for a practice exercise, quiz question, homework-style question, or learning activity for a supported level and subject.
+
+The tool understands natural level requests such as "level five" and handles unavailable levels gracefully without inventing exercises.
+
+**Example requests:**
+- "Give me a level five math exercise."
+- "Give me a level four English exercise."
+- "???? ???? 5 ?? math exercise ???"

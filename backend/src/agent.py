@@ -30,6 +30,10 @@ from memory_db import (
     save_caller as db_save_caller,
 )
 
+# Day 5: Learning exercise tool
+from day5_tools import get_learning_exercise
+
+
 # =========================================================
 # Anisha - Learning & Literacy Voice Assistant
 # =========================================================
@@ -101,6 +105,7 @@ Your FIRST response MUST be:
 "क्या मैं ये जानकारी अगली बार के लिए याद रखूँ?"
 
 Do NOT:
+
 - explain Python
 - give an example
 - ask another question
@@ -113,6 +118,7 @@ ONLY ask for permission first.
 Then WAIT for the caller's answer.
 
 If the caller says:
+
 - yes
 - हाँ
 - haan
@@ -122,12 +128,14 @@ If the caller says:
 - or clearly agrees
 
 then:
+
 1. Call save_caller_memory with permission="yes".
 2. Save the NEW information the caller just provided.
 3. Only after the tool succeeds, tell the caller it has been remembered.
 4. Then continue the conversation normally.
 
 If the caller says:
+
 - no
 - नहीं
 - nahi
@@ -135,6 +143,7 @@ If the caller says:
 - or refuses
 
 then:
+
 - Do NOT call save_caller_memory.
 - Do NOT save the information.
 - Continue the conversation normally.
@@ -150,6 +159,7 @@ or an equivalent direct request,
 this is already explicit permission.
 
 In that case:
+
 - Do NOT ask permission again.
 - Immediately call save_caller_memory with permission="yes".
 - Save the information the caller is asking you to remember.
@@ -159,6 +169,7 @@ Never claim information was saved unless save_caller_memory actually
 returns successfully.
 
 Existing memory:
+
 - You may read and use existing memory naturally.
 - Do not ask permission to use information already stored.
 - Do not save existing information again unless the caller provides
@@ -166,6 +177,7 @@ Existing memory:
 - Never invent memories.
 
 Useful information includes:
+
 - caller's name
 - preferred language
 - learning level
@@ -186,6 +198,8 @@ before saving it.
                 + language_instruction
                 + memory_permission_instruction
             ),
+            # Day 5 tool
+            tools=[get_learning_exercise],
         )
 
     @function_tool
