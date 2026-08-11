@@ -1,4 +1,4 @@
-﻿"""Outbound telephony agent â€” places calls and talks to whoever answers.
+﻿"""Outbound telephony agent — places calls and talks to whoever answers.
 
 Unlike the inbound agent, this one does the dialling. It waits to be dispatched
 into a room with a phone number in the job metadata, then asks LiveKit to call
@@ -37,15 +37,20 @@ from livekit.agents import (
 from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+
 logger = logging.getLogger("outbound-agent")
 
 load_dotenv(".env.local")
 
-# Required â€” create this with `lk sip outbound create` (see src/telephony/README.md).
+
+# Required — create this with `lk sip outbound create`
+# (see src/telephony/README.md).
 OUTBOUND_TRUNK_ID = os.getenv("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
 
-# Optional â€” a phone number to transfer people to when they ask for a human.
+
+# Optional — a phone number to transfer people to when they ask for a human.
 TRANSFER_TO_NUMBER = os.getenv("TRANSFER_TO_NUMBER")
+
 
 # Change this prompt to change what your outbound agent does.
 SYSTEM_PROMPT = """You are Anisha, a friendly Learning and Literacy voice assistant.
@@ -62,13 +67,27 @@ their level. Encourage them and keep responses conversational because this is a
 phone call.
 
 If the person asks for a human, use the transfer_to_human tool.
-If you reach a voicemail or answering machine, use the detected_answering_machine tool.
-When the call is finished, use the end_call tool."""
+
+If you reach a voicemail or answering machine, do not hang up automatically.
+Continue the call unless the person clearly asks you to stop.
+
+NEVER use the end_call tool just because the learner says they are ready, yes,
+okay, hello, or wants to continue.
+
+Only use end_call when the learner explicitly asks to stop, end, cancel, or hang
+up, or after the learner has clearly said goodbye."""
+
 
 # The first thing the person hears when they pick up.
-GREETING = "Hi, this is Anisha, your learning assistant. I am calling for your daily practice session. If this is not a good time, just say so and I will stop the call."
+GREETING = (
+    "Hi, this is Anisha, your learning assistant. "
+    "I am calling for your daily practice session. "
+    "If this is not a good time, just say so and I will stop the call."
+)
 
-# The identity LiveKit gives the person we call. Used to transfer them later.
+
+# The identity LiveKit gives the person we call.
+# Used to transfer them later.
 CALLEE_IDENTITY = "phone-user"
 
 
@@ -85,14 +104,18 @@ class OutboundAgent(Agent):
         them with their request.
         """
         if not TRANSFER_TO_NUMBER:
-            return "Transfers are not available on this line. Offer to have someone call back instead."
+            return (
+                "Transfers are not available on this line. "
+                "Offer to have someone call back instead."
+            )
 
-        # Tell them before transferring â€” the SIP transfer cuts off the audio.
+        # Tell them before transferring — the SIP transfer cuts off the audio.
         await context.session.generate_reply(
             instructions="Tell them you're connecting them to a colleague now."
         )
 
         logger.info("transferring call to %s", TRANSFER_TO_NUMBER)
+
         try:
             await self.ctx.api.sip.transfer_sip_participant(
                 api.TransferSIPParticipantRequest(
@@ -104,30 +127,32 @@ class OutboundAgent(Agent):
             )
         except Exception:
             logger.exception("transfer failed")
-            return "The transfer did not go through. Apologize and offer a call back."
+            return (
+                "The transfer did not go through. "
+                "Apologize and offer a call back."
+            )
 
         return "Transferred."
 
     @function_tool
-    async def detected_answering_machine(self, context: RunContext) -> str:
-        """Hang up because the call reached a voicemail or answering machine.
+    async def detected_answering_machine(
+        self, context: RunContext
+    ) -> str:
+        """Do not hang up automatically when an answering machine is detected.
 
-        Use this as soon as you hear a recorded greeting rather than a live person.
+        Continue the conversation unless the learner explicitly asks to stop.
         """
-        logger.info("answering machine detected â€” hanging up")
-        await self._hangup()
-        return "Call ended."
+        logger.info("answering machine detected - continuing call")
+        return "Continue the conversation. Do not hang up automatically."
 
     @function_tool
     async def end_call(self, context: RunContext) -> str:
-        """Hang up the call.
+        """End the phone call ONLY when the learner explicitly asks to stop,
+        end, cancel, hang up, or clearly says goodbye.
 
-        Use this once the conversation is finished and you have said goodbye.
+        NEVER use this when the learner says they are ready, yes, okay,
+        hello, wants to continue, or answers a practice question.
         """
-        await context.session.generate_reply(
-            instructions="Thank them for their time and say a short goodbye."
-        )
-
         logger.info("ending call")
         await self._hangup()
         return "Call ended."
@@ -152,12 +177,15 @@ server.setup_fnc = prewarm
 def phone_number_from_metadata(ctx: JobContext) -> str | None:
     """Read the number to dial out of the dispatch metadata set by dial.py."""
     metadata = ctx.job.metadata
+
     if not metadata:
         return None
+
     try:
         return json.loads(metadata).get("phone_number")
     except json.JSONDecodeError:
-        # Allow a bare phone number as metadata too, for quick `lk dispatch` tests.
+        # Allow a bare phone number as metadata too, for quick `lk dispatch`
+        # tests.
         return metadata.strip() or None
 
 
@@ -168,47 +196,62 @@ async def outbound_agent(ctx: JobContext):
     }
 
     phone_number = phone_number_from_metadata(ctx)
+
     if not phone_number:
         logger.error(
-            "no phone number in job metadata â€” dispatch with "
+            "no phone number in job metadata — dispatch with "
             '{"phone_number": "+15551234567"}'
         )
         ctx.shutdown()
         return
 
     if not OUTBOUND_TRUNK_ID:
-        logger.error("LIVEKIT_SIP_OUTBOUND_TRUNK_ID is not set â€” cannot place calls")
+        logger.error(
+            "LIVEKIT_SIP_OUTBOUND_TRUNK_ID is not set — cannot place calls"
+        )
         ctx.shutdown()
         return
 
     await ctx.connect()
 
-    # Same voice pipeline as src/agent.py â€” see that file for the annotated version.
+    # Same voice pipeline as src/agent.py.
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3"),
+        stt=deepgram.STT(
+            model="nova-3",
+            language="multi",
+        ),
         llm=google.LLM(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash-lite",
         ),
         tts=murf.TTS(
             voice="Anisha",
             style="Conversation",
-            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            tokenizer=tokenize.basic.SentenceTokenizer(
+                min_sentence_len=2
+            ),
             text_pacing=True,
         ),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
+
+        # Audio stability / phone echo protection.
+        allow_interruptions=False,
+        min_endpointing_delay=0.8,
+        max_endpointing_delay=4.0,
+
+        preemptive_generation=False,
     )
 
-    # Start the session while the phone is still ringing so the models are warm
-    # by the time somebody picks up.
+    # Start the session while the phone is still ringing so the models are
+    # warm by the time somebody picks up.
     session_started = asyncio.create_task(
         session.start(
             agent=OutboundAgent(ctx),
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
-                    # BVCTelephony is tuned for the narrow frequency range of phone audio.
+                    # BVCTelephony is tuned for the narrow frequency range
+                    # of phone audio.
                     noise_cancellation=lambda params: (
                         noise_cancellation.BVCTelephony()
                         if params.participant.kind
@@ -221,9 +264,9 @@ async def outbound_agent(ctx: JobContext):
     )
 
     logger.info("dialing %s", phone_number)
+
     try:
-        # wait_until_answered means this returns once the call connects â€” if the
-        # number is busy, declines, or never answers, it raises instead.
+        # wait_until_answered means this returns once the call connects.
         await ctx.api.sip.create_sip_participant(
             api.CreateSIPParticipantRequest(
                 room_name=ctx.room.name,
@@ -234,6 +277,7 @@ async def outbound_agent(ctx: JobContext):
                 wait_until_answered=True,
             )
         )
+
     except api.TwirpError as e:
         logger.error(
             "call to %s was not answered: %s (%s)",
@@ -247,11 +291,13 @@ async def outbound_agent(ctx: JobContext):
 
     await session_started
 
-    # Speak first â€” they just picked up an unexpected call and won't say anything.
-    await session.say(GREETING, allow_interruptions=True)
+    # Speak first — they just picked up an unexpected call and won't say
+    # anything.
+    await session.say(
+        GREETING,
+        allow_interruptions=False,
+    )
 
 
 if __name__ == "__main__":
     cli.run_app(server)
-
-
