@@ -30,6 +30,9 @@ from memory_db import (
     save_caller as db_save_caller,
 )
 
+# Day 7: Human Help / Escalation
+from escalation_db import create_escalation as db_create_escalation
+
 # Day 5: Learning exercise tool
 from day5_tools import get_learning_exercise
 
@@ -84,6 +87,7 @@ Always reply in the same language the caller is using.
 - If the caller speaks Hinglish, reply naturally in Hinglish.
 - Do not switch to English when the caller is speaking Hindi.
 - Do not translate a Hindi question into English unless the caller asks.
+- For fractions and simple math, prefer natural spoken notation such as "1/4" or "एक-चौथाई" instead of LaTeX such as "$\\frac{1}{4}$".
 """
 
         memory_permission_instruction = """
@@ -191,14 +195,92 @@ If new useful learning information is provided, ALWAYS ask for permission
 before saving it.
 """
 
+        # Day 7: Human Help / Escalation
+        human_help_instruction = """
+HUMAN HELP AND ESCALATION RULES:
+
+You are Anisha, a Learning & Literacy voice assistant.
+
+There are TWO situations where you should ask whether the caller wants
+human help:
+
+1. The learner explicitly asks for a teacher or human help.
+2. The learner is clearly upset or frustrated and needs human support.
+
+Do NOT create a human-help request for a normal learning question
+that you can reasonably answer yourself.
+
+IMPORTANT PERMISSION RULE:
+
+Before calling create_escalation, ALWAYS ask the caller for permission.
+
+Tell the caller what information will be shared:
+
+- who needs help
+- what happened
+- what you already checked
+- urgency
+- language
+- preferred follow-up method
+
+Ask for permission in the caller's language.
+
+For Hindi, say naturally:
+
+"मैं आपकी समस्या और ज़रूरी जानकारी एक teacher को भेज सकती हूँ।
+क्या आप इसकी अनुमति देते हैं?"
+
+Then WAIT for the caller's answer.
+
+If the caller clearly says YES:
+
+- Call create_escalation.
+- Include only useful information.
+- Do not include passwords, OTPs, PINs, account numbers,
+  or other private information.
+- Give the caller the reference ID returned by the tool.
+- Tell the caller that the request is open.
+- Explain the next step honestly.
+- Never promise an immediate human response unless it is guaranteed.
+
+If the caller says NO:
+
+- Do NOT call create_escalation.
+- Do NOT create a request.
+- Continue helping the caller normally.
+
+A normal learning conversation MUST NOT create an escalation request.
+
+Examples:
+
+Caller:
+"मुझे fractions समझाओ।"
+
+This is normal. Do not escalate.
+
+Caller:
+"मुझे teacher से बात करनी है।"
+
+Ask permission before creating an escalation.
+
+Caller:
+"मैं बहुत परेशान हूँ और मुझे किसी इंसान से मदद चाहिए।"
+
+Ask permission before creating an escalation.
+
+Always answer Hindi in Devanagari script.
+Never romanize Hindi.
+"""
+
         super().__init__(
             instructions=(
                 SYSTEM_PROMPT
                 + memory_context
                 + language_instruction
                 + memory_permission_instruction
+                + human_help_instruction
             ),
-            # Day 5 tool
+            # Day 5 tool - PRESERVED
             tools=[get_learning_exercise],
         )
 
@@ -222,8 +304,8 @@ before saving it.
             "ha",
             "हाँ",
             "हां",
-            "हां जी",
             "हाँ जी",
+            "हां जी",
         }
 
         if not approved:
@@ -251,6 +333,60 @@ before saving it.
 
         return "Caller memory saved successfully."
 
+    # =====================================================
+    # Day 7: Human Help / Escalation Tool
+    # =====================================================
+
+    @function_tool
+    async def create_escalation(
+        self,
+        context: RunContext,
+        who_needs_help: str,
+        problem: str,
+        already_checked: str | list[str],
+        urgency: str,
+        language: str,
+        preferred_followup: str,
+    ) -> str:
+        """
+        Create a human-help request only after the caller has
+        explicitly given permission to share the necessary information.
+
+        Use this only when:
+        1. The learner explicitly needs a teacher/human.
+        2. The learner is upset or frustrated and needs human support.
+
+        Never include passwords, OTPs, PINs, account numbers,
+        or other private credentials.
+        """
+
+        # Day 7 fix:
+        # Gemini may provide already_checked as a list,
+        # while the database expects a string.
+        if isinstance(already_checked, list):
+            already_checked = " ".join(already_checked)
+
+        reference_id = db_create_escalation(
+            who_needs_help=who_needs_help,
+            problem=problem,
+            already_checked=already_checked,
+            urgency=urgency,
+            language=language,
+            preferred_followup=preferred_followup,
+        )
+
+        logger.info(
+            "Created human-help escalation %s for caller %s",
+            reference_id,
+            self.user_id,
+        )
+
+        return (
+            f"Human-help request created successfully. "
+            f"Reference ID: {reference_id}. "
+            f"Status: open."
+        )
+
 
 # =========================================================
 # LiveKit Agent Server
@@ -276,7 +412,7 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name="anisha")
 async def anisha_agent(ctx: JobContext):
-    """Start an Anisha Learning & Literacy voice session."""
+    """Start Anisha Learning & Literacy voice session."""
 
     ctx.log_context_fields = {
         "room": ctx.room.name,

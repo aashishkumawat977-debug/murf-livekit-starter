@@ -37,20 +37,16 @@ from livekit.agents import (
 from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-
 logger = logging.getLogger("outbound-agent")
 
 load_dotenv(".env.local")
-
 
 # Required — create this with `lk sip outbound create`
 # (see src/telephony/README.md).
 OUTBOUND_TRUNK_ID = os.getenv("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
 
-
 # Optional — a phone number to transfer people to when they ask for a human.
 TRANSFER_TO_NUMBER = os.getenv("TRANSFER_TO_NUMBER")
-
 
 # Change this prompt to change what your outbound agent does.
 SYSTEM_PROMPT = """You are Anisha, a friendly Learning and Literacy voice assistant.
@@ -77,14 +73,12 @@ okay, hello, or wants to continue.
 Only use end_call when the learner explicitly asks to stop, end, cancel, or hang
 up, or after the learner has clearly said goodbye."""
 
-
 # The first thing the person hears when they pick up.
 GREETING = (
     "Hi, this is Anisha, your learning assistant. "
     "I am calling for your daily practice session. "
     "If this is not a good time, just say so and I will stop the call."
 )
-
 
 # The identity LiveKit gives the person we call.
 # Used to transfer them later.
@@ -271,6 +265,11 @@ async def outbound_agent(ctx: JobContext):
             api.CreateSIPParticipantRequest(
                 room_name=ctx.room.name,
                 sip_trunk_id=OUTBOUND_TRUNK_ID,
+
+                # IMPORTANT:
+                # Linphone SIP username used as the outbound From identity.
+                sip_number="ashishkumawat",
+
                 sip_call_to=phone_number,
                 participant_identity=CALLEE_IDENTITY,
                 participant_name="Phone user",
