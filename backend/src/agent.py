@@ -30,6 +30,9 @@ from memory_db import (
     save_caller as db_save_caller,
 )
 
+# Day 8: Call Analytics
+from call_analytics_db import record_call
+
 # Day 7: Human Help / Escalation
 from escalation_db import create_escalation as db_create_escalation
 
@@ -56,6 +59,9 @@ class Assistant(Agent):
     ) -> None:
         self.user_id = user_id
         self.memory = memory
+
+        # Day 8: Call Analytics
+        self.exercise_completed = False
 
         memory_context = ""
 
@@ -272,6 +278,27 @@ Always answer Hindi in Devanagari script.
 Never romanize Hindi.
 """
 
+        # Day 8: Learning Exercise Completion
+        exercise_completion_instruction = """
+DAY 8 - LEARNING EXERCISE COMPLETION:
+
+A successful call for the Learning & Literacy track means that the
+learner successfully completes a learning exercise.
+
+When you give the learner a learning exercise using the learning
+exercise tool:
+
+- Listen to the learner's answer.
+- Check whether the learner has actually completed the exercise.
+- If the learner gives the correct answer or otherwise successfully
+  completes the requested exercise, call mark_exercise_completed.
+- Only call mark_exercise_completed after the exercise is actually
+  completed successfully.
+- Do NOT call it merely because an exercise was requested or provided.
+- Do NOT call it when the learner gives an incorrect or incomplete answer.
+- If the learner needs another attempt, continue helping them normally.
+"""
+
         super().__init__(
             instructions=(
                 SYSTEM_PROMPT
@@ -279,6 +306,7 @@ Never romanize Hindi.
                 + language_instruction
                 + memory_permission_instruction
                 + human_help_instruction
+                + exercise_completion_instruction
             ),
             # Day 5 tool - PRESERVED
             tools=[get_learning_exercise],
@@ -387,6 +415,33 @@ Never romanize Hindi.
             f"Status: open."
         )
 
+    # =====================================================
+    # DAY 8 - CALL ANALYTICS
+    # =====================================================
+
+    @function_tool
+    async def mark_exercise_completed(
+        self,
+        context: RunContext,
+    ) -> str:
+        """
+        Mark the learner's exercise as successfully completed.
+
+        Use this only when the learner has actually completed
+        the learning exercise successfully.
+        """
+
+        self.exercise_completed = True
+
+        logger.info(
+            "Learning exercise completed successfully for caller %s",
+            self.user_id,
+        )
+
+        return (
+            "The learning exercise has been marked as successfully completed."
+        )
+
 
 # =========================================================
 # LiveKit Agent Server
@@ -484,14 +539,47 @@ async def anisha_agent(ctx: JobContext):
     )
 
     # ---------------------------------------------------------
+    # Day 8: Create Assistant Instance
+    # ---------------------------------------------------------
+
+    assistant = Assistant(
+        user_id=user_id,
+        memory=caller_memory,
+    )
+
+    # ---------------------------------------------------------
+    # Day 8: Call Analytics Close Handler
+    # ---------------------------------------------------------
+
+    def on_session_close(event):
+        outcome = (
+            "success"
+            if assistant.exercise_completed
+            else "failed"
+        )
+
+        record_call(
+            call_id=ctx.room.name,
+            user_id=user_id,
+            outcome=outcome,
+        )
+
+        logger.info(
+            "Day 8 call analytics recorded: "
+            "call_id=%s user_id=%s outcome=%s",
+            ctx.room.name,
+            user_id,
+            outcome,
+        )
+
+    session.on("close", on_session_close)
+
+    # ---------------------------------------------------------
     # Start LiveKit Session
     # ---------------------------------------------------------
 
     await session.start(
-        agent=Assistant(
-            user_id=user_id,
-            memory=caller_memory,
-        ),
+        agent=assistant,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
