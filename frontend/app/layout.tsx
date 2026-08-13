@@ -87,7 +87,8 @@ export default async function RootLayout({ children }: RootLayoutProps) {
                 className="hidden size-6 dark:block"
               />
             </a>
-            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
+
+            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase whitespace-nowrap">
               Built with{' '}
               <a
                 target="_blank"
@@ -101,6 +102,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           </header>
 
           {children}
+
           <div className="group fixed bottom-0 left-1/2 z-50 mb-2 -translate-x-1/2">
             <ThemeToggle className="translate-y-20 transition-transform delay-150 duration-300 group-hover:translate-y-0" />
           </div>

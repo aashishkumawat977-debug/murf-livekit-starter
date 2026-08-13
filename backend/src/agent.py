@@ -2,6 +2,7 @@ import logging
 
 from dotenv import load_dotenv
 from livekit import rtc
+
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -14,6 +15,7 @@ from livekit.agents import (
     room_io,
     tokenize,
 )
+
 from livekit.plugins import (
     deepgram,
     google,
@@ -21,27 +23,30 @@ from livekit.plugins import (
     noise_cancellation,
     silero,
 )
+
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from prompt import SYSTEM_PROMPT
+from math_specialist import MathSpecialistAgent
+
 from memory_db import (
     init_database,
     lookup_caller,
     save_caller as db_save_caller,
 )
 
-# Day 8: Call Analytics
+# Day 8
 from call_analytics_db import record_call
 
-# Day 7: Human Help / Escalation
+# Day 7
 from escalation_db import create_escalation as db_create_escalation
 
-# Day 5: Learning exercise tool
+# Day 5
 from day5_tools import get_learning_exercise
 
 
 # =========================================================
-# Anisha - Learning & Literacy Voice Assistant
+# Anisha
 # =========================================================
 
 logger = logging.getLogger("anisha-learning-agent")
@@ -50,20 +55,30 @@ load_dotenv(".env.local")
 
 
 class Assistant(Agent):
-    """Anisha - a friendly multilingual learning assistant."""
+    """
+    Anisha - Learning & Literacy Voice Assistant.
+
+    Maths is handled by Khyati.
+    """
 
     def __init__(
         self,
         user_id: str,
         memory: dict | None = None,
     ) -> None:
+
         self.user_id = user_id
         self.memory = memory
 
-        # Day 8: Call Analytics
+        # Day 8
         self.exercise_completed = False
 
-        memory_context = ""
+        # Day 9
+        self.math_transfer_completed = False
+
+        # =================================================
+        # Persistent memory
+        # =================================================
 
         if memory:
             memory_context = (
@@ -84,220 +99,152 @@ class Assistant(Agent):
                 "invent any previous information."
             )
 
+        # =================================================
+        # Language
+        # =================================================
+
         language_instruction = """
 IMPORTANT LANGUAGE RULE:
+
 Always reply in the same language the caller is using.
 
-- If the caller speaks Hindi, reply completely in Hindi using Devanagari script.
-- If the caller speaks English, reply in English.
-- If the caller speaks Hinglish, reply naturally in Hinglish.
-- Do not switch to English when the caller is speaking Hindi.
-- Do not translate a Hindi question into English unless the caller asks.
-- For fractions and simple math, prefer natural spoken notation such as "1/4" or "एक-चौथाई" instead of LaTeX such as "$\\frac{1}{4}$".
+- Hindi -> Hindi in Devanagari.
+- English -> English.
+- Hinglish -> natural Hinglish.
+
+Do not unnecessarily switch languages.
+
+For mathematics, use natural spoken notation.
+Avoid LaTeX.
 """
+
+        # =================================================
+        # Memory permission
+        # =================================================
 
         memory_permission_instruction = """
-PERSISTENT MEMORY PERMISSION RULES — HIGHEST PRIORITY:
+PERSISTENT MEMORY PERMISSION RULES:
 
-When the caller provides NEW personal or learning information that could
-be useful in future conversations, you MUST ask for permission to remember
-it BEFORE continuing the conversation.
-
-CRITICAL RULE:
-The permission question MUST come first.
-
-Example:
-
-Caller:
-"मुझे Python function समझने में दिक्कत होती है।"
-
-Your FIRST response MUST be:
-"क्या मैं ये जानकारी अगली बार के लिए याद रखूँ?"
-
-Do NOT:
-
-- explain Python
-- give an example
-- ask another question
-- give advice
-- say "कोई बात नहीं"
-- continue the learning conversation
-
-ONLY ask for permission first.
-
-Then WAIT for the caller's answer.
-
-If the caller says:
-
-- yes
-- हाँ
-- haan
-- याद रखो
-- याद रखना
-- yes remember
-- or clearly agrees
-
-then:
-
-1. Call save_caller_memory with permission="yes".
-2. Save the NEW information the caller just provided.
-3. Only after the tool succeeds, tell the caller it has been remembered.
-4. Then continue the conversation normally.
-
-If the caller says:
-
-- no
-- नहीं
-- nahi
-- don't remember
-- or refuses
-
-then:
-
-- Do NOT call save_caller_memory.
-- Do NOT save the information.
-- Continue the conversation normally.
-
-DIRECT MEMORY REQUEST:
-If the caller explicitly says:
-"मुझे याद रखो"
-"इसे याद रखो"
-"याद रखना"
-"इसको याद रखना"
-or an equivalent direct request,
-
-this is already explicit permission.
-
-In that case:
-
-- Do NOT ask permission again.
-- Immediately call save_caller_memory with permission="yes".
-- Save the information the caller is asking you to remember.
-
-IMPORTANT:
-Never claim information was saved unless save_caller_memory actually
-returns successfully.
-
-Existing memory:
-
-- You may read and use existing memory naturally.
-- Do not ask permission to use information already stored.
-- Do not save existing information again unless the caller provides
-  genuinely new information.
-- Never invent memories.
-
-Useful information includes:
-
-- caller's name
-- preferred language
-- learning level
-- subjects being studied
-- topics being studied
-- topics already covered
-- recurring learning difficulties
-- recurring mistakes
-
-If new useful learning information is provided, ALWAYS ask for permission
+When the caller provides NEW personal or learning information
+that could be useful in future conversations, ask permission
 before saving it.
+
+If the caller explicitly asks to remember something:
+
+- Do not ask permission again.
+- Save it immediately with permission="yes".
+
+Never claim something was saved unless the tool succeeds.
+
+Existing memory can be used naturally.
+
+Do not save existing information again unless genuinely new.
 """
 
-        # Day 7: Human Help / Escalation
+        # =================================================
+        # Human help
+        # =================================================
+
         human_help_instruction = """
-HUMAN HELP AND ESCALATION RULES:
+HUMAN HELP RULES:
 
-You are Anisha, a Learning & Literacy voice assistant.
+Ask whether the caller wants human help when:
 
-There are TWO situations where you should ask whether the caller wants
-human help:
+1. They explicitly ask for a teacher or human.
+2. They are clearly upset and need human support.
 
-1. The learner explicitly asks for a teacher or human help.
-2. The learner is clearly upset or frustrated and needs human support.
+Before creating escalation, ALWAYS ask permission.
 
-Do NOT create a human-help request for a normal learning question
-that you can reasonably answer yourself.
-
-IMPORTANT PERMISSION RULE:
-
-Before calling create_escalation, ALWAYS ask the caller for permission.
-
-Tell the caller what information will be shared:
-
-- who needs help
-- what happened
-- what you already checked
-- urgency
-- language
-- preferred follow-up method
-
-Ask for permission in the caller's language.
-
-For Hindi, say naturally:
-
-"मैं आपकी समस्या और ज़रूरी जानकारी एक teacher को भेज सकती हूँ।
-क्या आप इसकी अनुमति देते हैं?"
-
-Then WAIT for the caller's answer.
-
-If the caller clearly says YES:
-
-- Call create_escalation.
-- Include only useful information.
-- Do not include passwords, OTPs, PINs, account numbers,
-  or other private information.
-- Give the caller the reference ID returned by the tool.
-- Tell the caller that the request is open.
-- Explain the next step honestly.
-- Never promise an immediate human response unless it is guaranteed.
-
-If the caller says NO:
-
-- Do NOT call create_escalation.
-- Do NOT create a request.
-- Continue helping the caller normally.
-
-A normal learning conversation MUST NOT create an escalation request.
-
-Examples:
-
-Caller:
-"मुझे fractions समझाओ।"
-
-This is normal. Do not escalate.
-
-Caller:
-"मुझे teacher से बात करनी है।"
-
-Ask permission before creating an escalation.
-
-Caller:
-"मैं बहुत परेशान हूँ और मुझे किसी इंसान से मदद चाहिए।"
-
-Ask permission before creating an escalation.
-
-Always answer Hindi in Devanagari script.
-Never romanize Hindi.
+Do not escalate normal learning questions.
 """
 
-        # Day 8: Learning Exercise Completion
+        # =================================================
+        # Exercise completion
+        # =================================================
+
         exercise_completion_instruction = """
 DAY 8 - LEARNING EXERCISE COMPLETION:
 
-A successful call for the Learning & Literacy track means that the
-learner successfully completes a learning exercise.
+A successful call means the learner successfully completes
+a learning exercise.
 
-When you give the learner a learning exercise using the learning
-exercise tool:
-
-- Listen to the learner's answer.
-- Check whether the learner has actually completed the exercise.
-- If the learner gives the correct answer or otherwise successfully
-  completes the requested exercise, call mark_exercise_completed.
-- Only call mark_exercise_completed after the exercise is actually
-  completed successfully.
-- Do NOT call it merely because an exercise was requested or provided.
-- Do NOT call it when the learner gives an incorrect or incomplete answer.
-- If the learner needs another attempt, continue helping them normally.
+Only mark the exercise completed after the learner actually
+answers it successfully.
 """
+
+        # =================================================
+        # Day 9 - Maths handoff
+        # =================================================
+
+        specialist_handoff_instruction = """
+DAY 9 - KHYATI MATHS SPECIALIST
+
+You are Anisha, the main Learning & Literacy assistant.
+
+When the learner clearly asks for mathematics:
+
+YOU MUST call:
+
+transfer_to_math_specialist
+
+Examples:
+
+- maths practice
+- math practice
+- मुझे maths practice करनी है
+- fractions समझाओ
+- percentage समझाओ
+- algebra practice
+- geometry समझाओ
+- maths question solve करो
+- 3/4 + 1/4 कितना है?
+
+IMPORTANT:
+
+Do NOT solve mathematics yourself.
+
+Do NOT answer mathematics yourself.
+
+Do NOT create a maths problem yourself.
+
+Transfer to Khyati.
+
+After the transfer succeeds:
+
+STOP ACTING AS ANISHA.
+
+Do not generate another reply after the transfer tool call.
+
+Do not say anything after the transfer is complete.
+
+The transfer tool itself speaks the SINGLE handoff sentence.
+
+Never say Khyati's introduction.
+
+Never say:
+
+"नमस्ते! मैं Khyati हूँ..."
+
+Never say:
+
+"मैं Khyati हूँ..."
+
+Never ask the learner to say "ok".
+
+The learner must NOT repeat the maths request.
+
+Khyati automatically continues from the preserved conversation.
+
+IMPORTANT:
+
+The learner should NOT need to say "ok" after the handoff.
+
+Khyati starts the maths practice automatically.
+"""
+
+        # =================================================
+        # Register Anisha
+        # =================================================
 
         super().__init__(
             instructions=(
@@ -307,10 +254,16 @@ exercise tool:
                 + memory_permission_instruction
                 + human_help_instruction
                 + exercise_completion_instruction
+                + specialist_handoff_instruction
             ),
-            # Day 5 tool - PRESERVED
-            tools=[get_learning_exercise],
+            tools=[
+                get_learning_exercise,
+            ],
         )
+
+    # =====================================================
+    # Persistent Memory
+    # =====================================================
 
     @function_tool
     async def save_caller_memory(
@@ -321,9 +274,6 @@ exercise tool:
         facts: dict | None = None,
         permission: str = "no",
     ) -> str:
-        """
-        Save caller information only after explicit permission.
-        """
 
         approved = permission.strip().lower() in {
             "yes",
@@ -338,12 +288,11 @@ exercise tool:
 
         if not approved:
             logger.info(
-                "Caller did not give permission to save memory for %s",
+                "Memory permission denied for caller %s",
                 self.user_id,
             )
-            return (
-                "Memory was not saved because permission was not given."
-            )
+
+            return "Memory was not saved because permission was not given."
 
         memory = db_save_caller(
             user_id=self.user_id,
@@ -362,7 +311,7 @@ exercise tool:
         return "Caller memory saved successfully."
 
     # =====================================================
-    # Day 7: Human Help / Escalation Tool
+    # Human Help
     # =====================================================
 
     @function_tool
@@ -376,21 +325,7 @@ exercise tool:
         language: str,
         preferred_followup: str,
     ) -> str:
-        """
-        Create a human-help request only after the caller has
-        explicitly given permission to share the necessary information.
 
-        Use this only when:
-        1. The learner explicitly needs a teacher/human.
-        2. The learner is upset or frustrated and needs human support.
-
-        Never include passwords, OTPs, PINs, account numbers,
-        or other private credentials.
-        """
-
-        # Day 7 fix:
-        # Gemini may provide already_checked as a list,
-        # while the database expects a string.
         if isinstance(already_checked, list):
             already_checked = " ".join(already_checked)
 
@@ -404,7 +339,7 @@ exercise tool:
         )
 
         logger.info(
-            "Created human-help escalation %s for caller %s",
+            "Created escalation %s for caller %s",
             reference_id,
             self.user_id,
         )
@@ -416,7 +351,7 @@ exercise tool:
         )
 
     # =====================================================
-    # DAY 8 - CALL ANALYTICS
+    # Day 8
     # =====================================================
 
     @function_tool
@@ -424,17 +359,11 @@ exercise tool:
         self,
         context: RunContext,
     ) -> str:
-        """
-        Mark the learner's exercise as successfully completed.
-
-        Use this only when the learner has actually completed
-        the learning exercise successfully.
-        """
 
         self.exercise_completed = True
 
         logger.info(
-            "Learning exercise completed successfully for caller %s",
+            "Learning exercise completed for caller %s",
             self.user_id,
         )
 
@@ -442,19 +371,103 @@ exercise tool:
             "The learning exercise has been marked as successfully completed."
         )
 
+    # =====================================================
+    # Day 9 - Maths Specialist Transfer
+    # =====================================================
+
+    @function_tool
+    async def transfer_to_math_specialist(
+        self,
+        context: RunContext,
+    ) -> tuple[Agent, str]:
+        """
+        Transfer from Anisha to Khyati.
+
+        Flow:
+
+        1. Anisha speaks ONE handoff sentence.
+        2. Khyati becomes active.
+        3. Khyati automatically starts maths.
+        4. No "ok" required.
+        5. Anisha does not speak again.
+        """
+
+        # -------------------------------------------------
+        # Prevent duplicate transfer
+        # -------------------------------------------------
+
+        if self.math_transfer_completed:
+            logger.warning(
+                "Duplicate maths transfer blocked for caller %s",
+                self.user_id,
+            )
+
+            return self, ""
+
+        self.math_transfer_completed = True
+
+        logger.info(
+            "Transferring caller %s to Khyati",
+            self.user_id,
+        )
+
+        # -------------------------------------------------
+        # Preserve COMPLETE conversation context
+        # -------------------------------------------------
+
+        specialist_chat_ctx = self.chat_ctx.copy(
+            exclude_instructions=True,
+        )
+
+        # -------------------------------------------------
+        # Create Khyati
+        # -------------------------------------------------
+
+        specialist = MathSpecialistAgent(
+            chat_ctx=specialist_chat_ctx,
+        )
+
+        logger.info(
+            "Khyati created for caller %s",
+            self.user_id,
+        )
+
+        # -------------------------------------------------
+        # SINGLE ANISHA HANDOFF
+        # -------------------------------------------------
+
+        await self.session.say(
+            "ठीक है, मैं आपको Maths Specialist Khyati के पास transfer कर रही हूँ।",
+            allow_interruptions=False,
+        )
+
+        # -------------------------------------------------
+        # Return Khyati
+        #
+        # Empty message is intentional.
+        # Khyati's on_enter() handles her own first response.
+        # -------------------------------------------------
+
+        return specialist, ""
+
 
 # =========================================================
-# LiveKit Agent Server
+# LiveKit Server
 # =========================================================
 
 server = AgentServer()
 
 
+# =========================================================
+# Prewarm
+# =========================================================
+
 def prewarm(proc: JobProcess):
-    """Load the voice activity detector before sessions start."""
 
     logger.info("Loading Silero VAD...")
+
     proc.userdata["vad"] = silero.VAD.load()
+
     logger.info("Silero VAD loaded successfully.")
 
 
@@ -462,12 +475,11 @@ server.setup_fnc = prewarm
 
 
 # =========================================================
-# Anisha Voice Session
+# Anisha Session
 # =========================================================
 
 @server.rtc_session(agent_name="anisha")
 async def anisha_agent(ctx: JobContext):
-    """Start Anisha Learning & Literacy voice session."""
 
     ctx.log_context_fields = {
         "room": ctx.room.name,
@@ -480,13 +492,14 @@ async def anisha_agent(ctx: JobContext):
 
     await ctx.connect()
 
-    # ---------------------------------------------------------
-    # Persistent Memory
-    # ---------------------------------------------------------
+    # =====================================================
+    # Persistent memory
+    # =====================================================
 
     init_database()
 
     participant = await ctx.wait_for_participant()
+
     user_id = participant.identity
 
     logger.info(
@@ -503,25 +516,37 @@ async def anisha_agent(ctx: JobContext):
         )
     else:
         logger.info(
-            "No previous memory found for caller: %s",
+            "No previous memory for caller: %s",
             user_id,
         )
 
-    # ---------------------------------------------------------
-    # Voice Agent Configuration
-    # ---------------------------------------------------------
+    # =====================================================
+    # Agent Session
+    # =====================================================
 
     session = AgentSession(
+
+        # -------------------------------------------------
+        # STT
+        # -------------------------------------------------
+
         stt=deepgram.STT(
             model="nova-3",
             language="multi",
         ),
 
+        # -------------------------------------------------
+        # LLM
+        # -------------------------------------------------
+
         llm=google.LLM(
             model="gemini-3.5-flash-lite",
         ),
 
-        # Anisha voice - locale intentionally not hardcoded.
+        # -------------------------------------------------
+        # Anisha TTS
+        # -------------------------------------------------
+
         tts=murf.TTS(
             voice="Anisha",
             style="Conversation",
@@ -531,27 +556,40 @@ async def anisha_agent(ctx: JobContext):
             text_pacing=True,
         ),
 
+        # -------------------------------------------------
+        # Turn Detection
+        # -------------------------------------------------
+
         turn_detection=MultilingualModel(),
 
+        # -------------------------------------------------
+        # VAD
+        # -------------------------------------------------
+
         vad=ctx.proc.userdata["vad"],
+
+        # -------------------------------------------------
+        # Preemptive generation
+        # -------------------------------------------------
 
         preemptive_generation=True,
     )
 
-    # ---------------------------------------------------------
-    # Day 8: Create Assistant Instance
-    # ---------------------------------------------------------
+    # =====================================================
+    # Create Anisha
+    # =====================================================
 
     assistant = Assistant(
         user_id=user_id,
         memory=caller_memory,
     )
 
-    # ---------------------------------------------------------
-    # Day 8: Call Analytics Close Handler
-    # ---------------------------------------------------------
+    # =====================================================
+    # Day 8 Analytics
+    # =====================================================
 
     def on_session_close(event):
+
         outcome = (
             "success"
             if assistant.exercise_completed
@@ -565,7 +603,7 @@ async def anisha_agent(ctx: JobContext):
         )
 
         logger.info(
-            "Day 8 call analytics recorded: "
+            "Call analytics recorded: "
             "call_id=%s user_id=%s outcome=%s",
             ctx.room.name,
             user_id,
@@ -574,9 +612,9 @@ async def anisha_agent(ctx: JobContext):
 
     session.on("close", on_session_close)
 
-    # ---------------------------------------------------------
-    # Start LiveKit Session
-    # ---------------------------------------------------------
+    # =====================================================
+    # Start
+    # =====================================================
 
     await session.start(
         agent=assistant,
@@ -594,22 +632,25 @@ async def anisha_agent(ctx: JobContext):
     )
 
     logger.info(
-        "Anisha is ready and listening in room: %s",
+        "Anisha ready in room: %s",
         ctx.room.name,
     )
 
-    # ---------------------------------------------------------
-    # Learning-Focused Welcome
-    # ---------------------------------------------------------
+    # =====================================================
+    # Welcome
+    # =====================================================
 
     if caller_memory and caller_memory.get("name"):
+
         name = caller_memory.get("name")
 
         welcome = (
             f"नमस्ते {name}! वापस स्वागत है। "
             "आज क्या पढ़ना या अभ्यास करना है?"
         )
+
     else:
+
         welcome = (
             "नमस्ते! मैं अनिशा हूँ, आपकी Learning & Literacy assistant। "
             "आज क्या पढ़ना या अभ्यास करना है?"
@@ -622,7 +663,7 @@ async def anisha_agent(ctx: JobContext):
 
 
 # =========================================================
-# Application Entry Point
+# Application Entry
 # =========================================================
 
 if __name__ == "__main__":
