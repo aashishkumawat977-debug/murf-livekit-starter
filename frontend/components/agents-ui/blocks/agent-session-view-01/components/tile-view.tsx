@@ -135,12 +135,13 @@ export function TileLayout({
   const isSpeaking = currentState === 'speaking';
   const isThinking = currentState === 'thinking';
 
+  // Agent name removed from the status labels
   const statusLabel = isSpeaking
-    ? 'Anisha is speaking'
+    ? 'Speaking'
     : isListening
       ? 'Listening to you'
       : isThinking
-        ? 'Anisha is thinking...'
+        ? 'Thinking...'
         : null;
 
   return (
@@ -232,7 +233,7 @@ export function TileLayout({
               }}
             />
 
-            {/* Anisha AI Center Avatar Frame */}
+            {/* AI Center Avatar Frame */}
             <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
               <div className={cn(
                 "relative h-16 w-16 overflow-hidden rounded-full border-2 border-background shadow-lg transition-transform duration-300",
@@ -249,7 +250,7 @@ export function TileLayout({
               </div>
             </div>
 
-            {/* Speaker State Indicator (Listening to you / Anisha is speaking) */}
+            {/* Speaker State Indicator */}
 
             <AnimatePresence mode="wait">
               {statusLabel && (
@@ -325,10 +326,23 @@ export function TileLayout({
                       {[0.4, 0.9, 0.6, 1.0, 0.5].map((heightFactor, i) => (
                         <motion.span
                           key={i}
-                          className={cn('w-0.5 h-3 rounded-full', isSpeaking ? 'bg-primary' : isListening ? 'bg-emerald-500' : 'bg-amber-500')}
+                          className={cn(
+                            'w-0.5 h-3 rounded-full',
+                            isSpeaking
+                              ? 'bg-primary'
+                              : isListening
+                                ? 'bg-emerald-500'
+                                : 'bg-amber-500'
+                          )}
                           animate={
                             isSpeaking || isListening
-                              ? { height: ['20%', `${heightFactor * 100}%`, '20%'] }
+                              ? {
+                                  height: [
+                                    '20%',
+                                    `${heightFactor * 100}%`,
+                                    '20%',
+                                  ],
+                                }
                               : { height: '20%' }
                           }
                           transition={{
@@ -483,8 +497,3 @@ export function TileLayout({
     </div>
   );
 }
-
-
-
-
-

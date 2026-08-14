@@ -227,18 +227,17 @@ export function AgentSessionView_01({
       {...props}
     >
       {chatOpen && (
-        <motion.div
-          {...CHAT_MOTION_PROPS}
-          className="absolute inset-x-3 top-[115px] bottom-32 z-20 mx-auto flex w-auto max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-md md:inset-x-12 md:top-[115px] md:bottom-44"
-        >
-          <AgentChatTranscript
-            messages={messages}
-            className="min-h-0 flex-1 overflow-y-auto"
-          />
-        </motion.div>
-      )}
-
-      <TileLayout
+  <motion.div
+    {...CHAT_MOTION_PROPS}
+    className="absolute inset-x-3 top-[115px] bottom-24 z-20 mx-auto flex w-auto max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-md md:inset-x-12 md:top-[115px] md:bottom-32"
+  >
+    <AgentChatTranscript
+      messages={messages}
+      className="min-h-0 flex-1 overflow-y-auto"
+    />
+  </motion.div>
+)}
+<TileLayout
         chatOpen={chatOpen}
         audioVisualizerType={audioVisualizerType}
         audioVisualizerColor={audioVisualizerColor}
@@ -367,6 +366,15 @@ export function AgentSessionView_01({
             className="absolute inset-x-0 top-0 h-4 -translate-y-full"
           />
 
+          {/*
+           * THE IMPORTANT FIX:
+           *
+           * The complete AgentControlBar is removed from the DOM
+           * as soon as LiveKit disconnects.
+           *
+           * This prevents the raw red microphone/camera/device
+           * buttons from appearing at the bottom after the call.
+           */}
           {isSessionConnected && (
             <AgentControlBar
               key="connected-agent-controls"
@@ -384,3 +392,6 @@ export function AgentSessionView_01({
     </section>
   );
 }
+
+
+

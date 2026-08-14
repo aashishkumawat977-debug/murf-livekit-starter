@@ -35,18 +35,13 @@ from memory_db import (
     save_caller as db_save_caller,
 )
 
-# Day 8
 from call_analytics_db import record_call
-
-# Day 7
 from escalation_db import create_escalation as db_create_escalation
-
-# Day 5
 from day5_tools import get_learning_exercise
 
 
 # =========================================================
-# Anisha
+# Logging
 # =========================================================
 
 logger = logging.getLogger("anisha-learning-agent")
@@ -54,11 +49,20 @@ logger = logging.getLogger("anisha-learning-agent")
 load_dotenv(".env.local")
 
 
+# =========================================================
+# Anisha
+# =========================================================
+
 class Assistant(Agent):
     """
-    Anisha - Learning & Literacy Voice Assistant.
+    Anisha - Main Learning & Literacy Assistant.
 
-    Maths is handled by Khyati.
+    Day 9:
+    Maths requests are handed to Khyati.
+
+    IMPORTANT:
+    After Anisha speaks the handoff sentence, Anisha must
+    not generate any further speech.
     """
 
     def __init__(
@@ -81,6 +85,7 @@ class Assistant(Agent):
         # =================================================
 
         if memory:
+
             memory_context = (
                 "\n\nPERSISTENT CALLER MEMORY:\n"
                 f"Name: {memory.get('name') or 'Unknown'}\n"
@@ -91,7 +96,9 @@ class Assistant(Agent):
                 "Do not claim to remember information that is not "
                 "present in this memory."
             )
+
         else:
+
             memory_context = (
                 "\n\nPERSISTENT CALLER MEMORY:\n"
                 "No previous memory was found for this caller. "
@@ -173,17 +180,15 @@ answers it successfully.
 """
 
         # =================================================
-        # Day 9 - Maths handoff
+        # Day 9 - Khyati Handoff
         # =================================================
 
         specialist_handoff_instruction = """
-DAY 9 - KHYATI MATHS SPECIALIST
+DAY 9 - KHYATI MATHS SPECIALIST HANDOFF
 
 You are Anisha, the main Learning & Literacy assistant.
 
-When the learner clearly asks for mathematics:
-
-YOU MUST call:
+When the learner clearly asks for mathematics, you MUST call:
 
 transfer_to_math_specialist
 
@@ -207,39 +212,49 @@ Do NOT answer mathematics yourself.
 
 Do NOT create a maths problem yourself.
 
-Transfer to Khyati.
+Transfer mathematics requests to Khyati.
 
-After the transfer succeeds:
+=========================================================
+CRITICAL HANDOFF STOP RULE
+=========================================================
 
-STOP ACTING AS ANISHA.
+When mathematics is requested:
 
-Do not generate another reply after the transfer tool call.
+1. Call transfer_to_math_specialist.
 
-Do not say anything after the transfer is complete.
+2. The tool itself speaks exactly ONE sentence:
 
-The transfer tool itself speaks the SINGLE handoff sentence.
+   "ठीक है, मैं आपको Maths Specialist Khyati के पास transfer कर रही हूँ।"
 
-Never say Khyati's introduction.
+3. After the tool speaks that sentence, Anisha is DONE.
 
-Never say:
+4. Anisha MUST NOT generate another response.
 
-"नमस्ते! मैं Khyati हूँ..."
+5. Anisha MUST NOT introduce Khyati.
 
-Never say:
+6. Anisha MUST NOT ask a maths question.
 
-"मैं Khyati हूँ..."
+7. Anisha MUST NOT repeat the handoff.
 
-Never ask the learner to say "ok".
+8. Anisha MUST NOT say:
+   "नमस्ते! मैं Khyati हूँ..."
+
+9. Anisha MUST NOT say:
+   "मैं Khyati हूँ..."
+
+10. Anisha MUST NOT say:
+    "आज हम गणित में क्या अभ्यास करेंगे?"
+
+11. Anisha MUST NOT say anything after the handoff.
+
+12. Khyati owns all speech after the handoff.
 
 The learner must NOT repeat the maths request.
 
-Khyati automatically continues from the preserved conversation.
+The learner does NOT need to say "ok".
 
-IMPORTANT:
-
-The learner should NOT need to say "ok" after the handoff.
-
-Khyati starts the maths practice automatically.
+The transfer tool returns an EMPTY tool message because
+Anisha's response is completely finished.
 """
 
         # =================================================
@@ -287,12 +302,15 @@ Khyati starts the maths practice automatically.
         }
 
         if not approved:
+
             logger.info(
                 "Memory permission denied for caller %s",
                 self.user_id,
             )
 
-            return "Memory was not saved because permission was not given."
+            return (
+                "Memory was not saved because permission was not given."
+            )
 
         memory = db_save_caller(
             user_id=self.user_id,
@@ -372,7 +390,7 @@ Khyati starts the maths practice automatically.
         )
 
     # =====================================================
-    # Day 9 - Maths Specialist Transfer
+    # Day 9 - Transfer to Khyati
     # =====================================================
 
     @function_tool
@@ -381,15 +399,16 @@ Khyati starts the maths practice automatically.
         context: RunContext,
     ) -> tuple[Agent, str]:
         """
-        Transfer from Anisha to Khyati.
+        Transfer Anisha -> Khyati.
 
-        Flow:
+        IMPORTANT:
 
-        1. Anisha speaks ONE handoff sentence.
-        2. Khyati becomes active.
-        3. Khyati automatically starts maths.
-        4. No "ok" required.
-        5. Anisha does not speak again.
+        Anisha speaks exactly ONE handoff sentence.
+
+        After that:
+        - Anisha generates nothing.
+        - The tool returns an empty string.
+        - Khyati takes over.
         """
 
         # -------------------------------------------------
@@ -397,6 +416,7 @@ Khyati starts the maths practice automatically.
         # -------------------------------------------------
 
         if self.math_transfer_completed:
+
             logger.warning(
                 "Duplicate maths transfer blocked for caller %s",
                 self.user_id,
@@ -407,46 +427,86 @@ Khyati starts the maths practice automatically.
         self.math_transfer_completed = True
 
         logger.info(
-            "Transferring caller %s to Khyati",
+            "=========================================="
+        )
+        logger.info(
+            "DAY 9: ANISHA -> KHYATI HANDOFF"
+        )
+        logger.info(
+            "Caller: %s",
             self.user_id,
         )
+        logger.info(
+            "=========================================="
+        )
 
-        # -------------------------------------------------
-        # Preserve COMPLETE conversation context
-        # -------------------------------------------------
+        # =================================================
+        # STEP 1
+        # Anisha speaks ONLY this sentence.
+        # =================================================
+
+        try:
+
+            await self.session.say(
+                "ठीक है, मैं आपको Maths Specialist Khyati "
+                "के पास transfer कर रही हूँ।",
+                allow_interruptions=False,
+            )
+
+            logger.info(
+                "Anisha handoff sentence spoken."
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to speak Anisha handoff: %s",
+                exc,
+            )
+
+        # =================================================
+        # STEP 2
+        # IMPORTANT CONTEXT FIX
+        #
+        # Do NOT pass Anisha's full generated assistant
+        # response to Khyati.
+        #
+        # Passing the old assistant response can cause
+        # duplicate introductions / questions.
+        #
+        # We create a clean context containing only the
+        # user's conversation context.
+        # =================================================
 
         specialist_chat_ctx = self.chat_ctx.copy(
             exclude_instructions=True,
         )
 
-        # -------------------------------------------------
-        # Create Khyati
-        # -------------------------------------------------
+        logger.info(
+            "Conversation context prepared for Khyati."
+        )
+
+        # =================================================
+        # STEP 3
+        # Create Khyati.
+        # =================================================
 
         specialist = MathSpecialistAgent(
             chat_ctx=specialist_chat_ctx,
         )
 
         logger.info(
-            "Khyati created for caller %s",
-            self.user_id,
+            "Khyati specialist created."
         )
 
-        # -------------------------------------------------
-        # SINGLE ANISHA HANDOFF
-        # -------------------------------------------------
-
-        await self.session.say(
-            "ठीक है, मैं आपको Maths Specialist Khyati के पास transfer कर रही हूँ।",
-            allow_interruptions=False,
-        )
-
-        # -------------------------------------------------
-        # Return Khyati
+        # =================================================
+        # STEP 4
         #
-        # Empty message is intentional.
-        # Khyati's on_enter() handles her own first response.
-        # -------------------------------------------------
+        # EMPTY MESSAGE IS CRITICAL.
+        #
+        # Anisha has already spoken her one sentence.
+        # Nothing else should be generated by Anisha.
+        # =================================================
 
         return specialist, ""
 
@@ -464,11 +524,15 @@ server = AgentServer()
 
 def prewarm(proc: JobProcess):
 
-    logger.info("Loading Silero VAD...")
+    logger.info(
+        "Loading Silero VAD..."
+    )
 
     proc.userdata["vad"] = silero.VAD.load()
 
-    logger.info("Silero VAD loaded successfully.")
+    logger.info(
+        "Silero VAD loaded successfully."
+    )
 
 
 server.setup_fnc = prewarm
@@ -510,11 +574,14 @@ async def anisha_agent(ctx: JobContext):
     caller_memory = lookup_caller(user_id)
 
     if caller_memory:
+
         logger.info(
             "Found existing memory for caller: %s",
             user_id,
         )
+
     else:
+
         logger.info(
             "No previous memory for caller: %s",
             user_id,
@@ -544,7 +611,7 @@ async def anisha_agent(ctx: JobContext):
         ),
 
         # -------------------------------------------------
-        # Anisha TTS
+        # ANISHA TTS
         # -------------------------------------------------
 
         tts=murf.TTS(
@@ -610,10 +677,13 @@ async def anisha_agent(ctx: JobContext):
             outcome,
         )
 
-    session.on("close", on_session_close)
+    session.on(
+        "close",
+        on_session_close,
+    )
 
     # =====================================================
-    # Start
+    # Start Anisha
     # =====================================================
 
     await session.start(
@@ -637,7 +707,7 @@ async def anisha_agent(ctx: JobContext):
     )
 
     # =====================================================
-    # Welcome
+    # Anisha Welcome
     # =====================================================
 
     if caller_memory and caller_memory.get("name"):
